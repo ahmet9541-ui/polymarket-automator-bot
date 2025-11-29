@@ -1,89 +1,70 @@
 import os
-import requests
-import json
 from telegram.ext import Updater, CommandHandler, CallbackContext
 from telegram import Update
+from ideas import generate_market_idea
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-MARKETS_URL = "https://gamma-api.polymarket.com/markets?active=true&closed=false&limit=100"
-POLL_INTERVAL = 30
+# интервал между авто-идеями (в секундах)
+POLL_INTERVAL = int(os.getenv("IDEA_INTERVAL", "3600"))  # по умолчанию 1 час
 
 subscribers = set()
-last_prices = {}
 
 
-def fetch_markets():
-    try:
-        r = requests.get(MARKETS_URL, timeout=10)
-        data = r.json()
-        if isinstance(data, dict) and "markets" in data:
-            return data["markets"]
-        return data
-    except:
-        return []
+def format_idea_text(idea: dict) -> str:
+    title = idea["title"]
+    category = idea["category"]
+    resolution = idea["resolution"]
+    notes = idea.get("notes", "")
+
+    text = (
+        "🧠 New market idea\n\n"
+        f"Category: {category}\n"
+        f"Title: {title}\n\n"
+        f"Resolution criteria:\n{resolution}\n"
+    )
+    if notes:
+        text += f"\nNotes: {notes}\n"
+
+    text += (
+        "\nYou can use this as a draft when creating a new market on Polymarket."
+    )
+    return text
 
 
-def parse_prices(raw):
-    try:
-        if isinstance(raw, str):
-            return json.loads(raw)
-        return raw
-    except:
-        return []
-
-
-def build_url(m):
-    slug = m.get("slug")
-    if slug:
-        return f"https://polymarket.com/market/{slug}"
-    return "https://polymarket.com"
-
-
-def detect_alerts(markets):
-    alerts = []
-    for m in markets:
-        id_ = m.get("id")
-        price = m.get("prices", [None])[0]
-
-        if id_ not in last_prices:
-            last_prices[id_] = price
-            continue
-
-        old = last_prices[id_]
-        if old is not None and price is not None:
-            change = abs(price - old)
-            if change >= 0.05:
-                alerts.append((m.get("question", "Market"), price, old, build_url(m)))
-
-        last_prices[id_] = price
-
-    return alerts
+def send_idea_to_chat(chat_id: int, context: CallbackContext):
+    idea = generate_market_idea()
+    text = format_idea_text(idea)
+    context.bot.send_message(chat_id, text)
 
 
 def broadcast(context: CallbackContext):
-    markets = fetch_markets()
-    if not markets:
+    # периодическая рассылка идей всем подписчикам
+    if not subscribers:
         return
-
-    alerts = detect_alerts(markets)
-    if not alerts:
-        return
-
-    for sub in list(subscribers):
-        for q, price, old, url in alerts:
-            text = f"⚡ Update\n{q}\nOld: {old}\nNew: {price}\n{url}"
-            context.bot.send_message(sub, text)
+    for chat_id in list(subscribers):
+        send_idea_to_chat(chat_id, context)
 
 
 def cmd_start(update: Update, context: CallbackContext):
-    subscribers.add(update.effective_chat.id)
-    update.message.reply_text("Subscribed. You'll get alerts.")
+    chat_id = update.effective_chat.id
+    subscribers.add(chat_id)
+    update.message.reply_text(
+        "You are subscribed to market ideas.\n"
+        "I'll send you new Polymarket-style markets periodically.\n\n"
+        "Use /idea to get one immediately, /stop to unsubscribe."
+    )
 
 
 def cmd_stop(update: Update, context: CallbackContext):
-    subscribers.discard(update.effective_chat.id)
-    update.message.reply_text("Unsubscribed.")
+    chat_id = update.effective_chat.id
+    subscribers.discard(chat_id)
+    update.message.reply_text("You are unsubscribed from automatic ideas.")
+
+
+def cmd_idea(update: Update, context: CallbackContext):
+    # мгновенная идея по запросу
+    send_idea_to_chat(update.effective_chat.id, context)
 
 
 def start_bot():
@@ -92,14 +73,17 @@ def start_bot():
 
     dp.add_handler(CommandHandler("start", cmd_start))
     dp.add_handler(CommandHandler("stop", cmd_stop))
+    dp.add_handler(CommandHandler("idea", cmd_idea))
 
-    # если job_queue отсутствует - создаём вручную
+    # настройка JobQueue (как мы делали раньше)
     if updater.job_queue is None:
         from telegram.ext import JobQueue
         updater.job_queue = JobQueue()
         updater.job_queue.set_dispatcher(dp)
         updater.job_queue.run_jobs()
 
-    updater.job_queue.run_repeating(broadcast, interval=POLL_INTERVAL, first=10)
+    # периодическая рассылка идей
+    updater.job_queue.run_repeating(broadcast, interval=POLL_INTERVAL, first=30)
+
     updater.start_polling()
     updater.idle()
