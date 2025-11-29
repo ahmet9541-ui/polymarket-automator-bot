@@ -39,26 +39,76 @@ def generate_cover_image(idea: dict) -> BytesIO:
     category = idea["category"]
 
     width, height = 1024, 576
-    img = Image.new("RGB", (width, height), color=(10, 12, 20))
+    img = Image.new("RGB", (width, height), color=(16, 18, 24))
     draw = ImageDraw.Draw(img)
 
-    # цвет подсветки по категории
+    # цвет по категории
     if "Crypto" in category:
-        accent = (40, 160, 255)
+        accent = (56, 189, 248)
     elif "Politics" in category:
-        accent = (180, 90, 255)
+        accent = (251, 113, 133)
     elif "Macro" in category:
-        accent = (0, 200, 140)
+        accent = (45, 212, 191)
     elif "News" in category:
-        accent = (255, 160, 60)
+        accent = (249, 168, 212)
     else:
-        accent = (200, 200, 200)
+        accent = (148, 163, 184)
 
-    # верхняя плашка
+    # верхняя полоса
     draw.rectangle([0, 0, width, height // 3], fill=accent)
 
-    font_title = ImageFont.load_default()
-    max_width = width - 80
+    # нормальный шрифт
+    try:
+        font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", 42)
+        font_cat = ImageFont.truetype("DejaVuSans-Bold.ttf", 24)
+    except Exception:
+        font_title = ImageFont.load_default()
+        font_cat = ImageFont.load_default()
+
+    def measure(text: str, font) -> tuple[int, int]:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+    # перенос заголовка
+    max_width = width - 160
+    words = title.split()
+    lines = []
+    current = ""
+    for w in words:
+        test = (current + " " + w).strip()
+        tw, _ = measure(test, font_title)
+        if tw <= max_width:
+            current = test
+        else:
+            if current:
+                lines.append(current)
+            current = w
+    if current:
+        lines.append(current)
+
+    # ограничим до 3 строк
+    lines = lines[:3]
+
+    # центрируем по вертикали во второй и третьей трети
+    total_height = sum(measure(line, font_title)[1] + 10 for line in lines) - 10
+    y = height // 3 + (height * 2 // 3 - total_height) // 2
+
+    for line in lines:
+        tw, th = measure(line, font_title)
+        x = (width - tw) // 2
+        draw.text((x, y), line, font=font_title, fill=(255, 255, 255))
+        y += th + 10
+
+    # подпись категории внизу
+    cat_text = category.upper()
+    ct_w, ct_h = measure(cat_text, font_cat)
+    draw.text((40, height - ct_h - 40), cat_text, font=font_cat, fill=accent)
+
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return buf
+
 
     def measure(text: str, font) -> tuple[int, int]:
         # заменяет устаревший textsize
