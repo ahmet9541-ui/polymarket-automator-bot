@@ -42,6 +42,7 @@ def generate_cover_image(idea: dict) -> BytesIO:
     img = Image.new("RGB", (width, height), color=(10, 12, 20))
     draw = ImageDraw.Draw(img)
 
+    # цвет подсветки по категории
     if "Crypto" in category:
         accent = (40, 160, 255)
     elif "Politics" in category:
@@ -53,16 +54,26 @@ def generate_cover_image(idea: dict) -> BytesIO:
     else:
         accent = (200, 200, 200)
 
+    # верхняя плашка
     draw.rectangle([0, 0, width, height // 3], fill=accent)
 
     font_title = ImageFont.load_default()
     max_width = width - 80
+
+    def measure(text: str, font) -> tuple[int, int]:
+        # заменяет устаревший textsize
+        bbox = draw.textbbox((0, 0), text, font=font)
+        w = bbox[2] - bbox[0]
+        h = bbox[3] - bbox[1]
+        return w, h
+
+    # перенос строки по ширине
     words = title.split()
     lines = []
     current = ""
     for w in words:
         test = (current + " " + w).strip()
-        tw, th = draw.textsize(test, font=font_title)
+        tw, th = measure(test, font_title)
         if tw <= max_width:
             current = test
         else:
@@ -72,21 +83,24 @@ def generate_cover_image(idea: dict) -> BytesIO:
     if current:
         lines.append(current)
 
+    # рисуем текст заголовка
     y = height // 3 + 40
     for line in lines[:4]:
-        tw, th = draw.textsize(line, font=font_title)
+        tw, th = measure(line, font_title)
         x = (width - tw) // 2
         draw.text((x, y), line, font=font_title, fill=(255, 255, 255))
         y += th + 10
 
+    # подпись категории
     cat_text = category.upper()
-    ct_w, ct_h = draw.textsize(cat_text, font=font_title)
+    ct_w, ct_h = measure(cat_text, font_title)
     draw.text((40, height - ct_h - 40), cat_text, font=font_title, fill=accent)
 
     buf = BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
     return buf
+
 
 
 def send_idea_to_chat(chat_id: int, context: CallbackContext):
