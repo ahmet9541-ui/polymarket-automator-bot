@@ -162,11 +162,13 @@ def generate_politics_idea_real():
 
 # ------------- NEWS (news сигнал, Currents API или аналог) -------------
 
+# ------------- NEWS (news сигнал, Currents API или аналог) -------------
+
 NEWS_API_KEY = os.getenv("NEWS_API_KEY")
+LAST_NEWS_URL = None  # запоминаем последнюю использованную статью
 
 
 def fetch_news():
-    """Пример под Currents API: latest news, английский язык."""
     if not NEWS_API_KEY:
         return []
 
@@ -178,7 +180,6 @@ def fetch_news():
     try:
         r = requests.get(url, params=params, timeout=10)
         data = r.json()
-        # у Currents ключ news, у GNews был бы articles
         return data.get("news", []) or data.get("articles", [])
     except Exception as e:
         print("fetch_news error:", e)
@@ -186,13 +187,15 @@ def fetch_news():
 
 
 def pick_geo_political_article():
+    global LAST_NEWS_URL
+
     articles = fetch_news()
     if not articles:
         return None
 
     keywords = [
         "Ukraine", "Russia", "NATO", "ceasefire", "war", "invasion",
-        "election", "president", "vote", "parliament",
+        "election", "vote", "president", "parliament", "senate", "congress",
         "sanctions", "referendum",
         "Bitcoin", "Ethereum", "crypto", "ETF", "SEC"
     ]
@@ -206,8 +209,15 @@ def pick_geo_political_article():
     if not candidates:
         return None
 
-    random.shuffle(candidates)
-    return candidates[0]
+    # пробуем не брать ту же самую ссылку два раза подряд
+    if LAST_NEWS_URL:
+        filtered = [a for a in candidates if a.get("url") != LAST_NEWS_URL]
+        if filtered:
+            candidates = filtered
+
+    article = random.choice(candidates)
+    LAST_NEWS_URL = article.get("url")
+    return article
 
 
 def generate_news_idea():
@@ -217,22 +227,26 @@ def generate_news_idea():
 
     title_text = article.get("title", "Major event")
     url = article.get("url", "")
-    text = (article.get("title") or "") + " " + (article.get("description") or "")
-    text_low = text.lower()
+    full_text = (article.get("title") or "") + " " + (article.get("description") or "")
+    text_low = full_text.lower()
 
     days_ahead = random.randint(14, 90)
     deadline = (dt.date.today() + dt.timedelta(days=days_ahead)).strftime("%Y-%m-%d")
 
-    if "ceasefire" in text_low or "peace" in text_low:
-        q = f"Will an official ceasefire related to this conflict be signed before {deadline}?"
+    # чуть более разные шаблоны
+    if "ceasefire" in text_low or "peace" in text_low or "truce" in text_low:
+        q = f"Will an official ceasefire related to the following situation be signed before {deadline}?"
     elif "election" in text_low or "vote" in text_low or "poll" in text_low:
-        q = f"Will the candidate or party leading major polls around this event win the upcoming election before {deadline}?"
+        q = (
+            "Will the side that is generally favoured in reputable polls regarding the "
+            f"following situation win the next relevant election before {deadline}?"
+        )
     elif "sanction" in text_low:
-        q = f"Will new major international sanctions related to this situation be officially announced before {deadline}?"
-    elif "etf" in text_low or "sec" in text_low or "bitcoin" in text_low or "ethereum" in text_low:
-        q = f"Will a major regulatory decision related to this topic be officially confirmed before {deadline}?"
+        q = f"Will new major international sanctions related to the following situation be officially announced before {deadline}?"
+    elif "etf" in text_low or "sec" in text_low or "bitcoin" in text_low or "ethereum" in text_low or "crypto" in text_low:
+        q = f"Will a major regulatory decision related to the following crypto or markets situation be officially confirmed before {deadline}?"
     else:
-        q = f"Will a verifiable escalation or resolution of this situation occur before {deadline}?"
+        q = f"Will there be a verifiable escalation or resolution of the following situation before {deadline}?"
 
     resolution = (
         "Resolves to YES if reputable international media (e.g. Reuters, AP, Bloomberg) "
