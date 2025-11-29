@@ -1,4 +1,7 @@
 import logging
+import os
+import threading
+
 from flask import Flask
 from bot import build_app
 
@@ -9,16 +12,22 @@ logging.basicConfig(
 
 flask_app = Flask(__name__)
 
+
 @flask_app.get("/healthz")
 def health():
     return "ok", 200
 
-def start_bot():
-    tg_app = build_app()
-    tg_app.run_polling()
+
+def run_bot():
+    """Запускаем Telegram-бота в отдельном потоке."""
+    app = build_app()
+    app.run_polling()
+
 
 if __name__ == "__main__":
-    import threading
-    t = threading.Thread(target=start_bot)
-    t.start()
-    flask_app.run(host="0.0.0.0", port=10000)
+    # Стартуем бота в отдельном потоке
+    threading.Thread(target=run_bot, daemon=True).start()
+
+    # Render даёт порт в переменной PORT
+    port = int(os.environ.get("PORT", 10000))
+    flask_app.run(host="0.0.0.0", port=port)
