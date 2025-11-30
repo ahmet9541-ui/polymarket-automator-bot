@@ -170,7 +170,7 @@ def build_cover_image(idea):
 def send_idea_to_chat(chat_id: int, context: CallbackContext):
     idea = generate_market_idea()
     text = format_idea_text(idea)
-    image_buf = generate_cover_image(idea)
+    image_buf = build_cover_image(idea)
 
     context.bot.send_photo(
         chat_id=chat_id,
