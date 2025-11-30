@@ -1,50 +1,19 @@
 import os
 from io import BytesIO
 
-from telegram.ext import Updater, CommandHandler, CallbackContext
+import requests
 from telegram import Update
+from telegram.ext import Updater, CommandHandler, CallbackContext
 from PIL import Image, ImageDraw, ImageFont
 
 from ideas import generate_market_idea
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-# интервал между авто-идеями (в секундах)
-POLL_INTERVAL = int(os.getenv("IDEA_INTERVAL", "3600"))  # по умолчанию 1 час
+# интервал между автоидеями в секундах (по умолчанию 1 час)
+POLL_INTERVAL = int(os.getenv("IDEA_INTERVAL", "3600"))
 
 subscribers = set()
-
-def build_cover_image(idea):
-    """
-    Пытаемся взять картинку из новости.
-    Если не получилось – делаем текстовую заглушку.
-    Если совсем всё плохо – вернём None, а хэндлер отправит только текст.
-    """
-    cover_url = idea.get("cover_url")
-    if cover_url:
-        try:
-            r = requests.get(cover_url, timeout=10)
-            r.raise_for_status()
-            content_type = r.headers.get("Content-Type", "")
-            if "image" in content_type.lower():
-                buf = BytesIO(r.content)
-                buf.seek(0)
-                return buf
-            else:
-                print("cover download: not an image", content_type)
-        except Exception as e:
-            print("cover download error:", e)
-
-    # fallback – старый генератор баннеров
-    try:
-        buf = generate_cover_image(idea)
-        if hasattr(buf, "read"):
-            return buf
-    except Exception as e:
-        print("fallback cover error:", e)
-
-    # вообще ничего – пусть вызывающий код решает, что делать
-    return None
 
 
 def format_idea_text(idea: dict) -> str:
@@ -67,6 +36,7 @@ def format_idea_text(idea: dict) -> str:
 
 
 def generate_cover_image(idea: dict) -> BytesIO:
+    """Рисуем обложку, если не удалось взять реальное фото."""
     title = idea["title"]
     category = idea["category"]
 
@@ -89,34 +59,15 @@ def generate_cover_image(idea: dict) -> BytesIO:
     # верхняя полоса
     draw.rectangle([0, 0, width, height // 3], fill=accent)
 
-    # нормальный шрифт
+    # шрифты
     try:
         font_title = ImageFont.truetype("DejaVuSans-Bold.ttf", 42)
         font_cat = ImageFont.truetype("DejaVuSans-Bold.ttf", 24)
     except Exception:
         font_title = ImageFont.load_default()
         font_cat = ImageFont.load_default()
-    image_buf = build_cover_image(idea)
 
-    if image_buf:
-        # есть нормальная картинка – шлём с обложкой
-        context.bot.send_photo(
-            chat_id=chat_id,
-            photo=image_buf,
-            caption=caption,
-            parse_mode=ParseMode.MARKDOWN,
-        )
-    else:
-        # картинки нет – чтобы не падать, отправляем просто текст
-        context.bot.send_message(
-            chat_id=chat_id,
-            text=caption,
-            parse_mode=ParseMode.MARKDOWN,
-        )
-
-
-    
-    def measure(text: str, font) -> tuple[int, int]:
+    def measure(text: str, font):
         bbox = draw.textbbox((0, 0), text, font=font)
         return bbox[2] - bbox[0], bbox[3] - bbox[1]
 
@@ -136,11 +87,9 @@ def generate_cover_image(idea: dict) -> BytesIO:
             current = w
     if current:
         lines.append(current)
-
-    # ограничим до 3 строк
     lines = lines[:3]
 
-    # центрируем по вертикали во второй и третьей трети
+    # размещаем по вертикали во второй трети
     total_height = sum(measure(line, font_title)[1] + 10 for line in lines) - 10
     y = height // 3 + (height * 2 // 3 - total_height) // 2
 
@@ -150,7 +99,7 @@ def generate_cover_image(idea: dict) -> BytesIO:
         draw.text((x, y), line, font=font_title, fill=(255, 255, 255))
         y += th + 10
 
-    # подпись категории внизу
+    # подпись категории
     cat_text = category.upper()
     ct_w, ct_h = measure(cat_text, font_cat)
     draw.text((40, height - ct_h - 40), cat_text, font=font_cat, fill=accent)
@@ -161,70 +110,51 @@ def generate_cover_image(idea: dict) -> BytesIO:
     return buf
 
 
-    def measure(text: str, font) -> tuple[int, int]:
-        # заменяет устаревший textsize
-        bbox = draw.textbbox((0, 0), text, font=font)
-        w = bbox[2] - bbox[0]
-        h = bbox[3] - bbox[1]
-        return w, h
+def build_cover_image(idea: dict) -> BytesIO | None:
+    """
+    1) Пытаемся взять фото из idea["cover_url"] (если есть и это картинка).
+    2) Если не получилось - рисуем баннер.
+    """
+    cover_url = idea.get("cover_url")
 
-    # перенос строки по ширине
-    words = title.split()
-    lines = []
-    current = ""
-    for w in words:
-        test = (current + " " + w).strip()
-        tw, th = measure(test, font_title)
-        if tw <= max_width:
-            current = test
-        else:
-            if current:
-                lines.append(current)
-            current = w
-    if current:
-        lines.append(current)
+    if cover_url:
+        try:
+            r = requests.get(cover_url, timeout=10)
+            r.raise_for_status()
+            content_type = r.headers.get("Content-Type", "")
+            if "image" in content_type.lower():
+                buf = BytesIO(r.content)
+                buf.seek(0)
+                return buf
+            else:
+                print("cover download: not an image", content_type)
+        except Exception as e:
+            print("cover download error:", e)
 
-    # рисуем текст заголовка
-    y = height // 3 + 40
-    for line in lines[:4]:
-        tw, th = measure(line, font_title)
-        x = (width - tw) // 2
-        draw.text((x, y), line, font=font_title, fill=(255, 255, 255))
-        y += th + 10
-
-    # подпись категории
-    cat_text = category.upper()
-    ct_w, ct_h = measure(cat_text, font_title)
-    draw.text((40, height - ct_h - 40), cat_text, font=font_title, fill=accent)
-
-    buf = BytesIO()
-    img.save(buf, format="PNG")
-    buf.seek(0)
-    return buf
-
+    try:
+        return generate_cover_image(idea)
+    except Exception as e:
+        print("fallback cover error:", e)
+        return None
 
 
 def send_idea_to_chat(chat_id: int, context: CallbackContext):
     idea = generate_market_idea()
-    text = format_idea_text(idea)
+    caption = format_idea_text(idea)
+
     image_buf = build_cover_image(idea)
 
     if image_buf:
-        # есть картинка – шлём как фото
         context.bot.send_photo(
             chat_id=chat_id,
             photo=image_buf,
             caption=caption,
-            parse_mode=ParseMode.MARKDOWN,
         )
     else:
-        # картинки нет – шлём просто текст, чтобы не ловить BadRequest
         context.bot.send_message(
             chat_id=chat_id,
             text=caption,
-            parse_mode=ParseMode.MARKDOWN,
         )
-
 
 
 def broadcast(context: CallbackContext):
@@ -239,7 +169,7 @@ def cmd_start(update: Update, context: CallbackContext):
     subscribers.add(chat_id)
     update.message.reply_text(
         "You are subscribed to market ideas.\n"
-        "I'll send you new data-driven Polymarket-style markets periodically.\n\n"
+        "I will send you new data driven Polymarket style markets periodically.\n\n"
         "Use /idea to get one immediately, /stop to unsubscribe."
     )
 
@@ -262,7 +192,7 @@ def start_bot():
     dp.add_handler(CommandHandler("stop", cmd_stop))
     dp.add_handler(CommandHandler("idea", cmd_idea))
 
-    # страховка: если job_queue нет, создаём
+    # на всякий случай, если job_queue нет
     if updater.job_queue is None:
         from telegram.ext import JobQueue
         updater.job_queue = JobQueue()
