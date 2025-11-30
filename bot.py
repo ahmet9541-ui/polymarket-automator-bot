@@ -64,7 +64,21 @@ def generate_cover_image(idea: dict) -> BytesIO:
     except Exception:
         font_title = ImageFont.load_default()
         font_cat = ImageFont.load_default()
+def build_cover_image(idea):
+    cover_url = idea.get("cover_url")
+    if cover_url:
+        try:
+            r = requests.get(cover_url, timeout=10)
+            r.raise_for_status()
+            buf = BytesIO(r.content)
+            buf.seek(0)
+            return buf
+        except:
+            pass
 
+    return generate_cover_image(idea)
+
+    
     def measure(text: str, font) -> tuple[int, int]:
         bbox = draw.textbbox((0, 0), text, font=font)
         return bbox[2] - bbox[0], bbox[3] - bbox[1]
