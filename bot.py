@@ -209,11 +209,22 @@ def send_idea_to_chat(chat_id: int, context: CallbackContext):
     text = format_idea_text(idea)
     image_buf = build_cover_image(idea)
 
-    context.bot.send_photo(
-        chat_id=chat_id,
-        photo=image_buf,
-        caption=text,
-    )
+    if image_buf:
+        # есть картинка – шлём как фото
+        context.bot.send_photo(
+            chat_id=chat_id,
+            photo=image_buf,
+            caption=caption,
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    else:
+        # картинки нет – шлём просто текст, чтобы не ловить BadRequest
+        context.bot.send_message(
+            chat_id=chat_id,
+            text=caption,
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
 
 
 def broadcast(context: CallbackContext):
