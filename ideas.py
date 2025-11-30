@@ -254,12 +254,22 @@ def generate_news_idea():
         f"before 23:59 UTC on {deadline}. Otherwise NO."
     )
 
+        # ищем картинку из статьи
+    image_url = (
+        article.get("image")
+        or article.get("image_url")
+        or article.get("urlToImage")
+        or None
+    )
+
     return {
         "category": "News-based event",
         "title": q,
         "resolution": resolution,
         "notes": f"Based on real news: {title_text} ({url})",
+        "cover_url": image_url,
     }
+
 
 
 # ------------- Главная точка: комбинируем все сигналы -------------
