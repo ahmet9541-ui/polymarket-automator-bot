@@ -14,6 +14,38 @@ POLL_INTERVAL = int(os.getenv("IDEA_INTERVAL", "3600"))  # по умолчани
 
 subscribers = set()
 
+def build_cover_image(idea):
+    """
+    Пытаемся взять картинку из новости.
+    Если не получилось – делаем текстовую заглушку.
+    Если совсем всё плохо – вернём None, а хэндлер отправит только текст.
+    """
+    cover_url = idea.get("cover_url")
+    if cover_url:
+        try:
+            r = requests.get(cover_url, timeout=10)
+            r.raise_for_status()
+            content_type = r.headers.get("Content-Type", "")
+            if "image" in content_type.lower():
+                buf = BytesIO(r.content)
+                buf.seek(0)
+                return buf
+            else:
+                print("cover download: not an image", content_type)
+        except Exception as e:
+            print("cover download error:", e)
+
+    # fallback – старый генератор баннеров
+    try:
+        buf = generate_cover_image(idea)
+        if hasattr(buf, "read"):
+            return buf
+    except Exception as e:
+        print("fallback cover error:", e)
+
+    # вообще ничего – пусть вызывающий код решает, что делать
+    return None
+
 
 def format_idea_text(idea: dict) -> str:
     title = idea["title"]
