@@ -2,16 +2,16 @@ import os
 from io import BytesIO
 
 import requests
-from telegram import Update
 from telegram.ext import Updater, CommandHandler, CallbackContext
+from telegram import Update
 from PIL import Image, ImageDraw, ImageFont
 
 from ideas import generate_market_idea
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-# интервал между автоидеями в секундах (по умолчанию 1 час)
-POLL_INTERVAL = int(os.getenv("IDEA_INTERVAL", "3600"))
+# интервал между авто-идеями (в секундах)
+POLL_INTERVAL = int(os.getenv("IDEA_INTERVAL", "3600"))  # по умолчанию 1 час
 
 subscribers = set()
 
@@ -36,7 +36,7 @@ def format_idea_text(idea: dict) -> str:
 
 
 def generate_cover_image(idea: dict) -> BytesIO:
-    """Рисуем обложку, если не удалось взять реальное фото."""
+    """Рисуем fallback-баннер, если нормальной картинки нет."""
     title = idea["title"]
     category = idea["category"]
 
@@ -71,7 +71,7 @@ def generate_cover_image(idea: dict) -> BytesIO:
         bbox = draw.textbbox((0, 0), text, font=font)
         return bbox[2] - bbox[0], bbox[3] - bbox[1]
 
-    # перенос заголовка
+    # перенос заголовка по ширине
     max_width = width - 160
     words = title.split()
     lines = []
@@ -87,9 +87,10 @@ def generate_cover_image(idea: dict) -> BytesIO:
             current = w
     if current:
         lines.append(current)
+
+    # максимум 3 строки
     lines = lines[:3]
 
-    # размещаем по вертикали во второй трети
     total_height = sum(measure(line, font_title)[1] + 10 for line in lines) - 10
     y = height // 3 + (height * 2 // 3 - total_height) // 2
 
@@ -112,14 +113,16 @@ def generate_cover_image(idea: dict) -> BytesIO:
 
 def build_cover_image(idea: dict) -> BytesIO | None:
     """
-    1) Пытаемся взять фото из idea["cover_url"] (если есть и это картинка).
-    2) Если не получилось - рисуем баннер.
+    1) Пробуем скачать картинку из новости (idea["cover_url"])
+    2) Если не вышло – рисуем fallback
+    3) Если и это не вышло – вернём None
     """
     cover_url = idea.get("cover_url")
 
-    if cover_url:
+    # защищаемся от None и кривых значений
+    if isinstance(cover_url, str) and cover_url.startswith("http"):
         try:
-            r = requests.get(cover_url, timeout=10)
+            r = requests.get(cover_url, timeout=8)
             r.raise_for_status()
             content_type = r.headers.get("Content-Type", "")
             if "image" in content_type.lower():
@@ -131,6 +134,7 @@ def build_cover_image(idea: dict) -> BytesIO | None:
         except Exception as e:
             print("cover download error:", e)
 
+    # fallback – рисуем баннер сами
     try:
         return generate_cover_image(idea)
     except Exception as e:
@@ -141,20 +145,12 @@ def build_cover_image(idea: dict) -> BytesIO | None:
 def send_idea_to_chat(chat_id: int, context: CallbackContext):
     idea = generate_market_idea()
     caption = format_idea_text(idea)
-
     image_buf = build_cover_image(idea)
 
     if image_buf:
-        context.bot.send_photo(
-            chat_id=chat_id,
-            photo=image_buf,
-            caption=caption,
-        )
+        context.bot.send_photo(chat_id=chat_id, photo=image_buf, caption=caption)
     else:
-        context.bot.send_message(
-            chat_id=chat_id,
-            text=caption,
-        )
+        context.bot.send_message(chat_id=chat_id, text=caption)
 
 
 def broadcast(context: CallbackContext):
@@ -169,7 +165,7 @@ def cmd_start(update: Update, context: CallbackContext):
     subscribers.add(chat_id)
     update.message.reply_text(
         "You are subscribed to market ideas.\n"
-        "I will send you new data driven Polymarket style markets periodically.\n\n"
+        "I'll send you new data-driven Polymarket-style markets periodically.\n\n"
         "Use /idea to get one immediately, /stop to unsubscribe."
     )
 
@@ -192,7 +188,7 @@ def start_bot():
     dp.add_handler(CommandHandler("stop", cmd_stop))
     dp.add_handler(CommandHandler("idea", cmd_idea))
 
-    # на всякий случай, если job_queue нет
+    # периодическая рассылка идей
     if updater.job_queue is None:
         from telegram.ext import JobQueue
         updater.job_queue = JobQueue()
