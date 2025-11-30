@@ -64,38 +64,23 @@ def generate_cover_image(idea: dict) -> BytesIO:
     except Exception:
         font_title = ImageFont.load_default()
         font_cat = ImageFont.load_default()
-def build_cover_image(idea):
-    """
-    Пытаемся скачать картинку из новости.
-    Если не получилось – аккуратно уходим в текстовую заглушку.
-    Если вообще всё упало – возвращаем None.
-    """
-    cover_url = idea.get("cover_url")
-    if cover_url:
-        try:
-            r = requests.get(cover_url, timeout=10)
-            r.raise_for_status()
-            content_type = r.headers.get("Content-Type", "")
-            if "image" in content_type.lower():
-                buf = BytesIO(r.content)
-                buf.seek(0)
-                return buf
-            else:
-                print("cover download: not an image", content_type)
-        except Exception as e:
-            print("cover download error:", e)
+    image_buf = build_cover_image(idea)
 
-    # fallback – старый генератор
-    try:
-        buf = generate_cover_image(idea)
-        # если это BytesIO – ок
-        if hasattr(buf, "read"):
-            return buf
-    except Exception as e:
-        print("fallback cover error:", e)
-
-    # вообще ничего нет – пусть вызывающий код обработает это
-    return None
+    if image_buf:
+        # есть нормальная картинка – шлём с обложкой
+        context.bot.send_photo(
+            chat_id=chat_id,
+            photo=image_buf,
+            caption=caption,
+            parse_mode=ParseMode.MARKDOWN,
+        )
+    else:
+        # картинки нет – чтобы не падать, отправляем просто текст
+        context.bot.send_message(
+            chat_id=chat_id,
+            text=caption,
+            parse_mode=ParseMode.MARKDOWN,
+        )
 
 
     
